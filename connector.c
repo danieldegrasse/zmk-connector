@@ -406,6 +406,109 @@ out:
 	return NULL;
 }
 
+/**
+ * @brief Set key data for a given key. Note that commit_keys must be
+ * called in order to save key state to ROM.
+ *
+ * @param serial: string with device serial number
+ * @param json: JSON data for key to set
+ * @param layer: layer of key to set
+ * @param key_idx: key offset to set
+ * @return 0 on success, or negative value on error
+ */
+int set_key_data(char *serial, const char *json, int layer, int key_idx) {
+        struct zmk_hid_vendor_key_sel_report sel;
+        struct zmk_hid_vendor_key_data_report data;
+	hid_device *dev;
+	int res;
+	cJSON *key, *item;
+
+	dev = open_device(serial);
+	if (dev == NULL) {
+		printf("Could not open device: %ls\n", hid_error(dev));
+		return -EIO;
+	}
+	/* Parse JSON data for key */
+	key = cJSON_Parse(json);
+	if (key == NULL) {
+		const char *err = cJSON_GetErrorPtr();
+		if (err != NULL) {
+			printf("Error before %s\n", err);
+		}
+		return -EINVAL;
+	}
+
+	sel.report_id = SETTINGS_REPORT_ID_KEY_SEL;
+	sel.body.layer_index = layer;
+	sel.body.key_index = key_idx;
+	res = hid_send_feature_report(dev, (uint8_t *)&sel, sizeof(sel));
+	if (res == -1) {
+		printf("HID error: %ls\n", hid_error(dev));
+		goto out;
+	}
+	/* Read key data */
+	data.report_id = SETTINGS_REPORT_ID_KEY_DATA;
+	item = cJSON_GetObjectItem(key, "behavior_id");
+	if (!(cJSON_IsNumber(item))) {
+		printf("Invalid JSON, no 'behavior_id'\n");
+		goto out;
+	}
+	data.body.behavior_id = item->valuedouble;
+
+	item = cJSON_GetObjectItem(key, "param1");
+	if (!(cJSON_IsNumber(item))) {
+		printf("Invalid JSON, no 'param1'\n");
+		goto out;
+	}
+	data.body.param1 = item->valuedouble;
+
+	item = cJSON_GetObjectItem(key, "param2");
+	if (!(cJSON_IsNumber(item))) {
+		printf("Invalid JSON, no 'param2'\n");
+		goto out;
+	}
+	data.body.param2 = item->valuedouble;
+	res = hid_send_feature_report(dev, (uint8_t *)&data, sizeof(data));
+	if (res == -1) {
+		printf("HID error: %ls\n", hid_error(dev));
+		goto out;
+	}
+
+	cJSON_Delete(key);
+	hid_close(dev);
+	return 0;
+out:
+	printf("Error while setting key data\n");
+	cJSON_Delete(key);
+	hid_close(dev);
+	return res;
+}
+
+/**
+ * @brief Commit key settings in RAM
+ *
+ * @param serial: string with device serial number
+ * @return 0 on success, or negative value on error
+ */
+int commit_keys(char *serial) {
+        struct zmk_hid_vendor_key_commit_report report;
+	hid_device *dev;
+	int res;
+
+	dev = open_device(serial);
+	if (dev == NULL) {
+		printf("Could not open device: %ls\n", hid_error(dev));
+		return -EIO;
+	}
+
+	report.report_id = SETTINGS_REPORT_ID_KEY_COMMIT;
+	res = hid_send_feature_report(dev, (uint8_t *)&report, sizeof(report));
+	if (res == -1) {
+		printf("HID error %ls\n", hid_error(dev));
+	}
+	hid_close(dev);
+	return 0;
+}
 
 void print_help(void) {
 	printf("zmk_connector: Interact with ZMK keyboard\n");
@@ -415,6 +518,9 @@ void print_help(void) {
 	printf("\tread_key <serial> <layer> <key_idx>: read key data from keyboard with <serial>\n"
 		"\t\tin layer <layer>, key number <key_idx>\n");
 	printf("\tread_keys <serial>: read all keys from keyboard with <serial>\n");
+	printf("\tset_key <serial> <json> <layer> <key_idx>: set key data to keyboard with\n"
+		"\t\t<serial> in layer <layer>, key number <key_idx>\n");
+	printf("\tcommit_keys <serial>: save key settings for keyboard, making them persistent\n");
 	return;
 }
 
@@ -488,6 +594,31 @@ int main(int argc, char* argv[])
 		}
 		printf("%s\n", hid_string);
 		free(hid_string);
+		return 0;
+	} else if (strcmp(argv[1], "set_key") == 0) {
+		int layer, key;
+
+		if (argc != 6) {
+			printf("Error, device serial, json, layer, and key required\n");
+			return -EINVAL;
+		}
+		layer = strtol(argv[4], NULL, 10);
+		key = strtol(argv[5], NULL, 10);
+
+		if (set_key_data(argv[2], argv[3], layer, key) != 0) {
+			printf("Could not set key data\n");
+			return -EIO;
+		}
+		return 0;
+	} else if (strcmp(argv[1], "commit_keys") == 0) {
+		if (argc != 3) {
+			printf("Error, device serial required\n");
+			return -EINVAL;
+		}
+		if (commit_keys(argv[2]) != 0) {
+			printf("Could not save key data\n");
+			return -EIO;
+		}
 		return 0;
 	}
 	printf("Invalid arguments\n");
