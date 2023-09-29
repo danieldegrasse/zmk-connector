@@ -312,6 +312,100 @@ out:
 	return NULL;
 }
 
+/**
+ * @brief Get JSON key data for all keys
+ *
+ * @param serial: string with device serial number
+ * @return string with all key data across layers, or NULL on error.
+ * 	If string is returned, caller must free it.
+ */
+char *get_all_keys(char *serial) {
+	struct zmk_hid_vendor_functions_report features;
+	struct zmk_hid_vendor_key_sel_report sel;
+	struct zmk_hid_vendor_key_data_report data;
+	hid_device *dev;
+	char *json_str;
+	int res;
+	cJSON *keys = NULL, *layer = NULL, *key = NULL;
+
+	dev = open_device(serial);
+	if (dev == NULL) {
+		printf("Could not open device: %ls\n", hid_error(dev));
+		return NULL;
+	}
+	keys = cJSON_CreateArray();
+	if (keys == NULL) {
+		printf("Could not create JSON array\n");
+		return NULL;
+	}
+	features.report_id = SETTINGS_REPORT_ID_FUNCTIONS;
+	res = hid_get_feature_report(dev, (uint8_t *)&features, sizeof(features));
+	if (res == -1) {
+		printf("HID error: %ls\n", hid_error(dev));
+		goto out;
+	}
+	for (uint32_t i = 0; i < features.body.layers; i++) {
+		layer = cJSON_CreateArray();
+		if (layer == NULL) {
+			goto out;
+		}
+		for (uint32_t j = 0; j < features.body.keycount; j++) {
+			/* Read key, append to array */
+			key = cJSON_CreateObject();
+			if (key == NULL) {
+				goto out;
+			}
+			sel.report_id = SETTINGS_REPORT_ID_KEY_SEL;
+			sel.body.layer_index = i;
+			sel.body.key_index = j;
+			res = hid_send_feature_report(dev, (uint8_t *)&sel,
+							sizeof(sel));
+			if (res == -1) {
+				printf("HID error: %ls\n", hid_error(dev));
+				goto out;
+			}
+			/* Read key data */
+			data.report_id = SETTINGS_REPORT_ID_KEY_DATA;
+			res = hid_get_feature_report(dev, (uint8_t *)&data,
+							sizeof(data));
+			if (res == -1) {
+				printf("HID error: %ls\n", hid_error(dev));
+				goto out;
+			}
+			/* Pass key data to JSON */
+			if (!cJSON_AddNumberToObject(key, "behavior_id",
+						data.body.behavior_id)) {
+				goto out;
+			}
+			if (!cJSON_AddNumberToObject(key, "param1",
+						data.body.param1)) {
+				goto out;
+			}
+			if (!cJSON_AddNumberToObject(key, "param2",
+						data.body.param2)) {
+				goto out;
+			}
+			cJSON_AddItemToArray(layer, key);
+		}
+		cJSON_AddItemToArray(keys, layer);
+	}
+	json_str = cJSON_PrintUnformatted(keys);
+	if (json_str == NULL) {
+		goto out;
+	}
+
+	cJSON_Delete(keys);
+	hid_close(dev);
+	return json_str;
+out:
+	printf("Error while reading all keys\n");
+	hid_close(dev);
+	cJSON_Delete(key);
+	cJSON_Delete(layer);
+	cJSON_Delete(keys);
+	return NULL;
+}
+
 
 void print_help(void) {
 	printf("zmk_connector: Interact with ZMK keyboard\n");
@@ -320,6 +414,7 @@ void print_help(void) {
 	printf("\tread_features <serial>: read keyboard with serial <serial> features\n");
 	printf("\tread_key <serial> <layer> <key_idx>: read key data from keyboard with <serial>\n"
 		"\t\tin layer <layer>, key number <key_idx>\n");
+	printf("\tread_keys <serial>: read all keys from keyboard with <serial>\n");
 	return;
 }
 
@@ -376,6 +471,19 @@ int main(int argc, char* argv[])
 		hid_string = get_key_data(argv[2], layer, key);
 		if (hid_string == NULL) {
 			printf("Could not get key data\n");
+			return -EIO;
+		}
+		printf("%s\n", hid_string);
+		free(hid_string);
+		return 0;
+	} else if (strcmp(argv[1], "read_keys") == 0) {
+		if (argc != 3) {
+			printf("Error, device serial required\n");
+			return -EINVAL;
+		}
+		hid_string = get_all_keys(argv[2]);
+		if (hid_string == NULL) {
+			printf("Could not get all keys\n");
 			return -EIO;
 		}
 		printf("%s\n", hid_string);
