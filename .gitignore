@@ -1,2 +1,4 @@
 *.swp
 zmk-connector*
+__pycache__
+*.json
