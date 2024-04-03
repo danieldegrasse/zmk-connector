@@ -20,10 +20,10 @@
 #define ZMK_VEND_ID 0x1d50
 #define ZMK_PROD_ID 0x615e
 
-#define SETTINGS_REPORT_ID_FUNCTIONS 0x3
-#define SETTINGS_REPORT_ID_KEY_SEL 0x4
-#define SETTINGS_REPORT_ID_KEY_DATA 0x5
-#define SETTINGS_REPORT_ID_KEY_COMMIT 0x6
+#define SETTINGS_REPORT_ID_FUNCTIONS 0x4
+#define SETTINGS_REPORT_ID_KEY_SEL 0x5
+#define SETTINGS_REPORT_ID_KEY_DATA 0x6
+#define SETTINGS_REPORT_ID_KEY_COMMIT 0x7
 
 /* ZMK HID report structures */
 struct zmk_hid_vendor_functions_report_body {
