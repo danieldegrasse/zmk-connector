@@ -54,8 +54,10 @@ def raw_to_key(raw_key):
     elif raw_key["behavior_id"] == 20:
         # Bootloader selector
         return "BOOTLOADER"
+    elif raw_key["behavior_id"] == 17:
+        return "NONE"
     else:
-        return "UNKNOWN"
+        return f"UNKNOWN({raw_key['behavior_id']}, {raw_key['param1']}, {raw_key['param2']})"
 
 """
 Converts human readable key description into raw key object
@@ -74,11 +76,21 @@ def key_to_raw(keystr):
         behavior_id = 20
         param1 = 0
         param2 = 0
-    else:
-        # Unknown key type. Default to a nice safe keycode binding: 0
-        behavior_id = 5
-        param1 = keycodes.desc_to_keycode("NUMBER_0")
+    elif keystr == "NONE":
+        behavior_id = 17
+        param1 = 0
         param2 = 0
+    elif "UNKNOWN" in keystr:
+        # Unknown key type. Parse behavior ID and key params
+        match = re.match(r'UNKNOWN\((\d+), (\d+), (\d+)\)', keystr)
+        if match is None:
+            sys.exit(f"Error, key string {keystr} is formatted incorrectly")
+        behavior_id = int(match.group(1))
+        param1 = int(match.group(2))
+        param2 = int(match.group(3))
+    else:
+        sys.exit(f"Error, invalid key string {keystr}")
+
     return {"behavior_id": behavior_id, "param1": param1, "param2": param2}
 
 """
@@ -110,14 +122,31 @@ Returns array of keyboard layers. Each layer is an array of keys
 def read_keys(device_serial):
     # read keys from ZMK device
     print("Reading keys. The helper program will likely request your password...")
-    res = subprocess.run(["sudo", "./zmk-connector", "read_keys", device_serial],
+    res = subprocess.run(["sudo", "./zmk-connector", "read_features", device_serial],
                         capture_output=True)
     if res.returncode != 0:
         print(res.stdout.decode('utf8'))
-        print(f"Error, could not read keys from keyboard ({res.returncode})")
+        print(f"Error, could not read features from keyboard ({res.returncode})")
         exit(res.returncode)
 
-    raw_keydata = json.loads(res.stdout)
+    features = json.loads(res.stdout)
+    raw_keydata = []
+    for layer in range(features["layer_count"]):
+        # Read all keys in layer
+        layerdata = []
+        for key in range(features["keycount"]):
+            res = subprocess.run(["sudo", "./zmk-connector", "read_key",
+                                 device_serial, str(layer), str(key)],
+                                 capture_output=True)
+            if res.returncode != 0:
+                print(res.stdout.decode('utf8'))
+                print(f"Error, could not read key {layer},{key} from keyboard "
+                      f"({res.returncode})")
+                exit(res.returncode)
+            keydata = json.loads(res.stdout)
+            layerdata.append(keydata)
+        raw_keydata.append(layerdata)
+
     parsed_keydata = []
     for layer in raw_keydata:
         parsed_layer = []
